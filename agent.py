@@ -118,12 +118,13 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-CONTEXT_TOKENS = _env_int("CONTEXT_TOKENS", 32000)
-MAX_TOOL_OUTPUT = _env_int("MAX_TOOL_OUTPUT", 6000)
-MAX_READ_LINES = 400
-LIST_LIMIT = 300
-MEMORY_LIMIT = 6000      # chars kept in .agent/memory.md
-SUMMARY_LIMIT = 4000     # chars of the rolling dialog summary
+IS_GROQ = "api.groq.com" in BASE_URL
+CONTEXT_TOKENS = _env_int("CONTEXT_TOKENS", 6000 if IS_GROQ else 32000)
+MAX_TOOL_OUTPUT = _env_int("MAX_TOOL_OUTPUT", 1500 if IS_GROQ else 6000)
+MAX_READ_LINES = 250 if IS_GROQ else 400
+LIST_LIMIT = 150 if IS_GROQ else 300
+MEMORY_LIMIT = 4000 if IS_GROQ else 6000
+SUMMARY_LIMIT = 2500 if IS_GROQ else 4000
 
 GRAY, RED, GREEN, YELLOW, CYAN, BLUE, RESET = (
     "\033[90m", "\033[91m", "\033[92m", "\033[93m", "\033[96m", "\033[94m", "\033[0m",
@@ -419,7 +420,9 @@ SYMBOL_RE = {
 }
 
 
-def repo_map(limit: int = 3500) -> str:
+def repo_map(limit: int = None) -> str:
+    if limit is None:
+        limit = 1000 if IS_GROQ else 3500
     lines, total, used = [], 0, 0
     for root, dirs, files in os.walk(WORKSPACE_DIR):
         dirs[:] = sorted(d for d in dirs if d not in IGNORED_DIRS)
@@ -430,7 +433,7 @@ def repo_map(limit: int = 3500) -> str:
             total += 1
             line = p.relative_to(WORKSPACE_DIR).as_posix()
             rx = SYMBOL_RE.get(p.suffix.lower())
-            if rx:
+            if rx and not IS_GROQ:
                 try:
                     if p.stat().st_size < 150_000:
                         text = p.read_text(encoding="utf-8", errors="ignore")
@@ -464,34 +467,33 @@ def package_summary() -> str:
                 out = [f"name: {d.get('name', '?')}"]
                 if d.get("scripts"):
                     out.append("scripts: " + ", ".join(f"{k}={v}" for k, v in d["scripts"].items()))
-                if d.get("dependencies"):
-                    out.append("dependencies: " + ", ".join(d["dependencies"].keys()))
-                if d.get("devDependencies"):
-                    out.append("devDependencies: " + ", ".join(d["devDependencies"].keys()))
-                manifests.append("### package.json\n" + clip("\n".join(out), 1200))
+                manifests.append("### package.json\n" + clip("\n".join(out), 400 if IS_GROQ else 1200))
         except (OSError, ValueError):
             pass
-    for mf in ("pyproject.toml", "Cargo.toml", "go.mod"):
-        p = WORKSPACE_DIR / mf
-        if p.is_file():
-            try:
-                manifests.append(f"### {mf}\n" + clip(p.read_text(encoding="utf-8", errors="replace"), 800))
-            except OSError:
-                pass
+    if not IS_GROQ:
+        for mf in ("pyproject.toml", "Cargo.toml", "go.mod"):
+            p = WORKSPACE_DIR / mf
+            if p.is_file():
+                try:
+                    manifests.append(f"### {mf}\n" + clip(p.read_text(encoding="utf-8", errors="replace"), 800))
+                except OSError:
+                    pass
     return "\n\n".join(manifests)
 
 
 def build_project_context() -> str:
-    parts, docs = [], 0
-    for name in CONTEXT_DOCS:
-        p = WORKSPACE_DIR / name
-        if p.is_file() and docs < 2:
-            docs += 1
-            parts.append(f"### {name}\n" + clip(p.read_text(encoding="utf-8", errors="replace"), 2500))
+    parts = []
+    if not IS_GROQ:
+        docs = 0
+        for name in CONTEXT_DOCS:
+            p = WORKSPACE_DIR / name
+            if p.is_file() and docs < 2:
+                docs += 1
+                parts.append(f"### {name}\n" + clip(p.read_text(encoding="utf-8", errors="replace"), 2500))
     pkg = package_summary()
     if pkg:
         parts.append(pkg)
-    parts.append("### File map (path: top-level symbols)\n" + repo_map())
+    parts.append("### File map\n" + repo_map())
     return "\n\n".join(parts)
 
 # --------------------------------------------------------------------------------------
@@ -1240,13 +1242,15 @@ def fit_context(sess: Session, force: bool = False):
     def used() -> int:
         return total_tokens(sess.system_text(), sess.history)
 
-    if not force and used() <= budget * 0.8:
+    target_ratio = 0.6 if IS_GROQ else 0.8
+    if not force and used() <= budget * target_ratio:
         return
     # 1. cheap and lossless-ish: clear old tool output and huge tool-call arguments
-    for keep in (8, 4, 2):
+    keep_steps = (3, 2, 1) if IS_GROQ else (8, 4, 2)
+    for keep in keep_steps:
         for i in range(max(0, len(sess.history) - keep)):
             sess.history[i] = shrink_message(sess.history[i])
-        if not force and used() <= budget * 0.7:
+        if not force and used() <= budget * (target_ratio - 0.1):
             return
     # 2. summarize the older part of the dialog, keep a recent tail (~30% of the budget)
     cut = choose_cut(sess.history, int(budget * 0.3))
@@ -1382,6 +1386,8 @@ def run_agent_turn(sess: Session, max_steps: int = 40):
             preview = result[:200] + ("..." if len(result) > 200 else "")
             print(f"{BLUE}[Tool Result]{RESET} {preview}")
             sess.history.append({"role": "tool", "tool_call_id": tc["id"], "name": name, "content": result})
+        if IS_GROQ and step < max_steps:
+            time.sleep(1.2)
         sess.save()
     print(f"{YELLOW}[max steps reached] say 'continue' to go on.{RESET}")
     sess.save()

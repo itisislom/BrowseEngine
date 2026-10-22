@@ -25,9 +25,21 @@ def load_env(env_path: Path):
 
 load_env(WORKSPACE_DIR / ".env")
 
-API_KEY = os.environ.get("WONKA_API_KEY", "")
-BASE_URL = os.environ.get("WONKA_BASE_URL", "https://wonka.chat/api/agents/v1").rstrip("/")
-DEFAULT_MODEL = os.environ.get("WONKA_MODEL", os.environ.get("WONKA_AGENT_ID", "claude-opus-5-5"))
+API_KEY = (
+    os.environ.get("HF_TOKEN")
+    or os.environ.get("HUGGINGFACE_API_KEY")
+    or os.environ.get("WONKA_API_KEY")
+    or os.environ.get("OPENAI_API_KEY", "")
+)
+BASE_URL = (
+    os.environ.get("HF_BASE_URL")
+    or os.environ.get("WONKA_BASE_URL", "https://router.huggingface.co/hf-inference/v1")
+).rstrip("/")
+DEFAULT_MODEL = (
+    os.environ.get("HF_MODEL")
+    or os.environ.get("WONKA_MODEL")
+    or os.environ.get("WONKA_AGENT_ID", "Qwen/Qwen2.5-Coder-32B-Instruct")
+)
 
 def safe_resolve_path(rel_path: str) -> Path:
     target = (WORKSPACE_DIR / rel_path).resolve()
@@ -299,6 +311,8 @@ def call_wonka_api(base_url: str, api_key: str, model: str, messages: list, tool
             return json.loads(body)
     except error.HTTPError as exc:
         err_body = exc.read().decode("utf-8", errors="replace")
+        if tools and exc.code == 400 and ("tool" in err_body.lower() or "schema" in err_body.lower()):
+            return call_wonka_api(base_url, api_key, model, messages, tools=None)
         try:
             err_json = json.loads(err_body)
             msg = err_json.get("error", {}).get("message", err_body)

@@ -299,7 +299,19 @@ def call_wonka_api(base_url: str, api_key: str, model: str, messages: list, tool
             return json.loads(body)
     except error.HTTPError as exc:
         err_body = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"HTTP {exc.code}: {err_body}")
+        try:
+            err_json = json.loads(err_body)
+            msg = err_json.get("error", {}).get("message", err_body)
+            if "Agent not found" in msg:
+                msg += (
+                    "\nTip: In WonkaChat, the model parameter is the unique Agent ID.\n"
+                    "Go to Agents -> All Agents in WonkaChat, click ⋯ next to your agent, select 'Copy link'.\n"
+                    "The URL format is: https://islom-2.wonka.chat/c/new?agent_id=<ID>\n"
+                    "Set WONKA_MODEL=<ID> in .env or run with -m <ID>."
+                )
+            raise RuntimeError(f"HTTP {exc.code}: {msg}")
+        except json.JSONDecodeError:
+            raise RuntimeError(f"HTTP {exc.code}: {err_body}")
     except RuntimeError:
         raise
     except Exception as exc:

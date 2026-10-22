@@ -33,3 +33,9 @@ Thumbs.db
 # Agent & workspace internals
 .agents/
 GEMINI.md
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+

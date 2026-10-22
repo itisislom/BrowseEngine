@@ -27,7 +27,7 @@ load_env(WORKSPACE_DIR / ".env")
 
 API_KEY = os.environ.get("WONKA_API_KEY", "")
 BASE_URL = os.environ.get("WONKA_BASE_URL", "https://wonka.chat/api/agents/v1").rstrip("/")
-AGENT_ID = os.environ.get("WONKA_AGENT_ID", "default")
+DEFAULT_MODEL = os.environ.get("WONKA_MODEL", os.environ.get("WONKA_AGENT_ID", "claude-opus-5-5"))
 
 def safe_resolve_path(rel_path: str) -> Path:
     target = (WORKSPACE_DIR / rel_path).resolve()
@@ -370,7 +370,7 @@ def main():
     parser.add_argument("prompt", nargs="*", help="Optional initial task prompt")
     parser.add_argument("--base-url", default=BASE_URL, help="WonkaChat Base URL")
     parser.add_argument("--api-key", default=API_KEY, help="WonkaChat API Key")
-    parser.add_argument("--model", default=AGENT_ID, help="Agent ID or model name")
+    parser.add_argument("-m", "--model", default=DEFAULT_MODEL, help="Agent ID or model name (e.g. claude-opus-5-5)")
     parser.add_argument("--max-steps", type=int, default=25, help="Max tool execution iterations")
     args = parser.parse_args()
 
@@ -384,7 +384,7 @@ def main():
     print("\033[1;34m       WonkaChat Coding Agent CLI       \033[0m")
     print("\033[1;34m========================================\033[0m")
     print(f"Base URL : {args.base_url}")
-    print(f"Agent ID : {args.model}")
+    print(f"Model    : {args.model}")
     print(f"Workspace: {WORKSPACE_DIR}\n")
 
     initial_prompt = " ".join(args.prompt).strip()

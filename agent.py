@@ -25,14 +25,14 @@ def load_env(env_path: Path):
 
 load_env(WORKSPACE_DIR / ".env")
 
-if os.environ.get("OPENROUTER_API_KEY"):
-    API_KEY = os.environ["OPENROUTER_API_KEY"]
-    BASE_URL = os.environ.get("BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
-    DEFAULT_MODEL = os.environ.get("MODEL", "qwen/qwen-2.5-coder-32b-instruct:free")
-elif os.environ.get("GROQ_API_KEY"):
+if os.environ.get("GROQ_API_KEY"):
     API_KEY = os.environ["GROQ_API_KEY"]
     BASE_URL = os.environ.get("BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
-    DEFAULT_MODEL = os.environ.get("MODEL", "qwen-2.5-coder-32b")
+    DEFAULT_MODEL = os.environ.get("MODEL", "qwen/qwen3.8-27b")
+elif os.environ.get("OPENROUTER_API_KEY"):
+    API_KEY = os.environ["OPENROUTER_API_KEY"]
+    BASE_URL = os.environ.get("BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
+    DEFAULT_MODEL = os.environ.get("MODEL", "google/gemma-4-31b-it:free")
 elif os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_API_KEY"):
     API_KEY = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_API_KEY", "")
     BASE_URL = os.environ.get("BASE_URL") or os.environ.get("HF_BASE_URL", "https://router.huggingface.co/v1").rstrip("/")
@@ -305,6 +305,7 @@ def call_wonka_api(base_url: str, api_key: str, model: str, messages: list, tool
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) BrowseEngine/1.0",
             "HTTP-Referer": "https://github.com/itisislom/BrowseEngine",
             "X-Title": "BrowseEngine Coding Agent"
         },

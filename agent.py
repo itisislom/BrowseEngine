@@ -25,21 +25,31 @@ def load_env(env_path: Path):
 
 load_env(WORKSPACE_DIR / ".env")
 
-API_KEY = (
-    os.environ.get("HF_TOKEN")
-    or os.environ.get("HUGGINGFACE_API_KEY")
-    or os.environ.get("WONKA_API_KEY")
-    or os.environ.get("OPENAI_API_KEY", "")
-)
-BASE_URL = (
-    os.environ.get("HF_BASE_URL")
-    or os.environ.get("WONKA_BASE_URL", "https://router.huggingface.co/hf-inference/v1")
-).rstrip("/")
-DEFAULT_MODEL = (
-    os.environ.get("HF_MODEL")
-    or os.environ.get("WONKA_MODEL")
-    or os.environ.get("WONKA_AGENT_ID", "Qwen/Qwen2.5-Coder-32B-Instruct")
-)
+if os.environ.get("OPENROUTER_API_KEY"):
+    API_KEY = os.environ["OPENROUTER_API_KEY"]
+    BASE_URL = os.environ.get("BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
+    DEFAULT_MODEL = os.environ.get("MODEL", "qwen/qwen-2.5-coder-32b-instruct:free")
+elif os.environ.get("GROQ_API_KEY"):
+    API_KEY = os.environ["GROQ_API_KEY"]
+    BASE_URL = os.environ.get("BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
+    DEFAULT_MODEL = os.environ.get("MODEL", "qwen-2.5-coder-32b")
+elif os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_API_KEY"):
+    API_KEY = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_API_KEY", "")
+    BASE_URL = os.environ.get("BASE_URL") or os.environ.get("HF_BASE_URL", "https://router.huggingface.co/v1").rstrip("/")
+    DEFAULT_MODEL = os.environ.get("MODEL") or os.environ.get("HF_MODEL", "Qwen/Qwen2.5-Coder-32B-Instruct")
+elif os.environ.get("WONKA_API_KEY"):
+    API_KEY = os.environ["WONKA_API_KEY"]
+    BASE_URL = os.environ.get("WONKA_BASE_URL", "https://islom-2.wonka.chat/api/agents/v1").rstrip("/")
+    DEFAULT_MODEL = os.environ.get("WONKA_MODEL") or os.environ.get("WONKA_AGENT_ID", "agent_Cnarqpg5JSuX5H2ZZ-hz2")
+else:
+    API_KEY = os.environ.get("OPENAI_API_KEY", "")
+    BASE_URL = os.environ.get("BASE_URL", "https://api.openai.com/v1").rstrip("/")
+    DEFAULT_MODEL = os.environ.get("MODEL", "gpt-4o")
+
+if "MODEL" in os.environ:
+    DEFAULT_MODEL = os.environ["MODEL"]
+if "BASE_URL" in os.environ:
+    BASE_URL = os.environ["BASE_URL"].rstrip("/")
 
 def safe_resolve_path(rel_path: str) -> Path:
     target = (WORKSPACE_DIR / rel_path).resolve()
@@ -294,7 +304,9 @@ def call_wonka_api(base_url: str, api_key: str, model: str, messages: list, tool
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
-            "Accept": "application/json"
+            "Accept": "application/json",
+            "HTTP-Referer": "https://github.com/itisislom/BrowseEngine",
+            "X-Title": "BrowseEngine Coding Agent"
         },
         method="POST"
     )

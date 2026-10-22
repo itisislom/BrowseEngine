@@ -38,6 +38,17 @@ WORKSPACE_DIR = Path(__file__).resolve().parent
 STATE_DIR = WORKSPACE_DIR / ".agent"
 SESSION_FILE = STATE_DIR / "session.json"
 MEMORY_FILE = STATE_DIR / "memory.md"
+MODELS_CACHE_FILE = STATE_DIR / "models_cache.json"
+
+
+def ensure_state_dir():
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    gi = STATE_DIR / ".gitignore"
+    if not gi.exists():
+        try:
+            gi.write_text("*\n", encoding="utf-8")
+        except OSError:
+            pass
 
 IGNORED_DIRS = {
     ".git", "node_modules", "dist", "build", "__pycache__", ".venv", "venv",
@@ -84,78 +95,158 @@ def load_env(env_path: Path):
 
 load_env(WORKSPACE_DIR / ".env")
 
-FREE_MODELS = [
-    {
-        "id": "1",
-        "provider": "Groq",
-        "model": "qwen/qwen3.8-27b",
-        "name": "Groq Qwen 3.8 27B",
-        "description": "Fast coding model, Groq free tier (14.4k req/day)",
-        "base_url": "https://api.groq.com/openai/v1",
-        "api_key_env": "GROQ_API_KEY",
-        "context_tokens": 6000,
-        "is_groq": True,
-    },
-    {
-        "id": "2",
-        "provider": "Google",
-        "model": "gemini-2.5-flash",
-        "name": "Gemini 2.5 Flash",
-        "description": "Smart, 1M context, Google AI Studio free tier",
-        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
-        "api_key_env": "GEMINI_API_KEY",
-        "context_tokens": 32000,
-        "is_groq": False,
-    },
-    {
-        "id": "3",
-        "provider": "Groq",
-        "model": "openai/gpt-oss-120b",
-        "name": "Groq GPT-OSS 120B",
-        "description": "Massive 120B open frontier model, Groq free tier",
-        "base_url": "https://api.groq.com/openai/v1",
-        "api_key_env": "GROQ_API_KEY",
-        "context_tokens": 6000,
-        "is_groq": True,
-    },
-    {
-        "id": "4",
-        "provider": "Groq",
-        "model": "openai/gpt-oss-20b",
-        "name": "Groq GPT-OSS 20B",
-        "description": "Fast 20B reasoning model, Groq free tier",
-        "base_url": "https://api.groq.com/openai/v1",
-        "api_key_env": "GROQ_API_KEY",
-        "context_tokens": 6000,
-        "is_groq": True,
-    },
-    {
-        "id": "5",
-        "provider": "Google",
-        "model": "gemini-2.5-pro",
-        "name": "Gemini 2.5 Pro",
-        "description": "Frontier reasoning, Google AI Studio free tier",
-        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
-        "api_key_env": "GEMINI_API_KEY",
-        "context_tokens": 32000,
-        "is_groq": False,
-    },
-    {
-        "id": "6",
-        "provider": "OpenRouter",
-        "model": "google/gemma-4-31b-it:free",
-        "name": "OpenRouter Gemma 31B",
-        "description": "OpenRouter free model",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
-        "context_tokens": 8000,
-        "is_groq": False,
-    },
-]
+
+def probe_model(m: dict) -> bool:
+    url = f"{m['base_url']}/chat/completions"
+    payload = {"model": m["model"], "messages": [{"role": "user", "content": "1"}], "max_tokens": 2}
+    key = os.environ.get(m["api_key_env"], "")
+    if not key:
+        return False
+    req = request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 BrowseEngine/1.0",
+        },
+        method="POST"
+    )
+    try:
+        with request.urlopen(req, timeout=4) as res:
+            return res.status == 200
+    except Exception:
+        return False
 
 
-def get_available_models() -> list:
-    return [m for m in FREE_MODELS if os.environ.get(m["api_key_env"])]
+def discover_models(force: bool = False) -> list:
+    ensure_state_dir()
+    if not force and MODELS_CACHE_FILE.is_file():
+        try:
+            cache = json.loads(MODELS_CACHE_FILE.read_text(encoding="utf-8"))
+            if time.time() - cache.get("timestamp", 0) < 3600 * 6:
+                models = cache.get("models", [])
+                if models:
+                    return models
+        except Exception:
+            pass
+
+    found = []
+
+    # 1. Groq Live Models
+    if os.environ.get("GROQ_API_KEY"):
+        try:
+            url = "https://api.groq.com/openai/v1/models"
+            req = request.Request(url, headers={
+                "Authorization": f"Bearer {os.environ['GROQ_API_KEY']}",
+                "User-Agent": "Mozilla/5.0 BrowseEngine/1.0"
+            })
+            with request.urlopen(req, timeout=6) as res:
+                data = json.loads(res.read().decode("utf-8"))
+                for m in data.get("data", []):
+                    mid = m["id"]
+                    if not any(x in mid.lower() for x in ["whisper", "guard", "orpheus", "prompt"]):
+                        found.append({
+                            "provider": "Groq",
+                            "model": mid,
+                            "name": f"Groq {mid.split('/')[-1]}",
+                            "description": "Groq free tier (14.4k req/day)",
+                            "base_url": "https://api.groq.com/openai/v1",
+                            "api_key_env": "GROQ_API_KEY",
+                            "context_tokens": 6000,
+                            "is_groq": True,
+                        })
+        except Exception:
+            pass
+
+    # 2. Gemini Live Models
+    if os.environ.get("GEMINI_API_KEY"):
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models?key={os.environ['GEMINI_API_KEY']}"
+            req = request.Request(url, headers={"User-Agent": "Mozilla/5.0 BrowseEngine/1.0"})
+            with request.urlopen(req, timeout=6) as res:
+                data = json.loads(res.read().decode("utf-8"))
+                for m in data.get("models", []):
+                    mname = m["name"].replace("models/", "")
+                    methods = m.get("supportedGenerationMethods", [])
+                    if "generateContent" in methods and not any(x in mname.lower() for x in ["tts", "embedding", "image", "audio", "banana", "robotics", "lyria", "research"]):
+                        found.append({
+                            "provider": "Google",
+                            "model": mname,
+                            "name": f"Gemini {mname}",
+                            "description": "Google AI Studio free tier",
+                            "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+                            "api_key_env": "GEMINI_API_KEY",
+                            "context_tokens": 32000,
+                            "is_groq": False,
+                        })
+        except Exception:
+            pass
+
+    # 3. OpenRouter Free Models
+    if os.environ.get("OPENROUTER_API_KEY"):
+        try:
+            url = "https://openrouter.ai/api/v1/models"
+            req = request.Request(url, headers={
+                "Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}",
+                "User-Agent": "Mozilla/5.0 BrowseEngine/1.0"
+            })
+            with request.urlopen(req, timeout=6) as res:
+                data = json.loads(res.read().decode("utf-8"))
+                for m in data.get("data", []):
+                    mid = m["id"]
+                    if ":free" in mid:
+                        found.append({
+                            "provider": "OpenRouter",
+                            "model": mid,
+                            "name": f"OpenRouter {mid.split('/')[-1].replace(':free', '')}",
+                            "description": "OpenRouter free model",
+                            "base_url": "https://openrouter.ai/api/v1",
+                            "api_key_env": "OPENROUTER_API_KEY",
+                            "context_tokens": 8000,
+                            "is_groq": False,
+                        })
+        except Exception:
+            pass
+
+    def sort_key(m):
+        mid = m["model"].lower()
+        if "qwen3.8" in mid: return 0
+        if "gemini-2.5-flash" in mid: return 1
+        if "gpt-oss-120b" in mid: return 2
+        if "gemini-3.5-flash" in mid: return 3
+        if "gemini-3-flash" in mid: return 4
+        if "gpt-oss-20b" in mid: return 5
+        if "gemini-flash-lite" in mid: return 6
+        if "gemma" in mid: return 7
+        return 20
+
+    found.sort(key=sort_key)
+
+    verified = []
+    for cand in found:
+        if len(verified) >= 12:
+            break
+        if probe_model(cand):
+            verified.append(cand)
+
+    final_models = verified if verified else found[:6]
+    for idx, m in enumerate(final_models, 1):
+        m["id"] = str(idx)
+
+    try:
+        MODELS_CACHE_FILE.write_text(json.dumps({
+            "timestamp": time.time(),
+            "models": final_models
+        }, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+    return final_models
+
+
+def get_available_models(force: bool = False) -> list:
+    return discover_models(force=force)
 
 
 def _find_default_model() -> dict:
@@ -165,7 +256,11 @@ def _find_default_model() -> dict:
         for m in available:
             if m["model"].lower() == req_model.lower() or req_model.lower() in m["name"].lower():
                 return m
-    return available[0] if available else FREE_MODELS[0]
+    return available[0] if available else {
+        "id": "1", "provider": "Groq", "model": "qwen/qwen3.8-27b", "name": "Groq Qwen 3.8 27B",
+        "description": "Groq free tier", "base_url": "https://api.groq.com/openai/v1",
+        "api_key_env": "GROQ_API_KEY", "context_tokens": 6000, "is_groq": True
+    }
 
 
 ACTIVE_MODEL = _find_default_model()
@@ -243,13 +338,6 @@ def strip_think(text: str) -> str:
     if "</think>" in text:
         text = text.split("</think>", 1)[1]
     return text.strip()
-
-
-def ensure_state_dir():
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
-    gi = STATE_DIR / ".gitignore"
-    if not gi.exists():
-        gi.write_text("*\n", encoding="utf-8")
 
 
 def is_secret_file(path_or_name) -> bool:
@@ -1564,19 +1652,24 @@ HELP = """Commands:
 
 
 def handle_model_command(arg: str, sess: Session):
+    if arg in ("--refresh", "-r", "refresh"):
+        print(f"{CYAN}[API Checker] Probing providers for live accessible models...{RESET}")
+        discover_models(force=True)
+        arg = ""
+
     available = get_available_models()
     if not available:
-        print(f"{YELLOW}No free models found with configured API keys.{RESET}")
+        print(f"{YELLOW}No verified free models found with configured API keys.{RESET}")
         return
     if not arg:
-        print(f"\n{CYAN}=== Available Free Models ==={RESET}")
+        print(f"\n{CYAN}=== Real Verified Free Models (Online via API) ==={RESET}")
         curr = CFG.get("current_model", available[0])
         for idx, m in enumerate(available, 1):
             is_active = (m["model"] == curr["model"] and m["base_url"] == curr["base_url"])
             tag = f" {GREEN}[active]{RESET}" if is_active else ""
             print(f"  {idx}. {m['name']} ({m['provider']}){tag}")
             print(f"     {GRAY}ID: {m['model']} | Context: {m['context_tokens']} tok | {m['description']}{RESET}")
-        print(f"\nSwitch model: /model <number> or /model <name>\n")
+        print(f"\nSwitch model: /model <number> or /model <name> | Refresh: /model --refresh\n")
         return
     chosen = None
     if arg.isdigit():

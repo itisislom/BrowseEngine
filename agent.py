@@ -289,10 +289,19 @@ def call_wonka_api(base_url: str, api_key: str, model: str, messages: list, tool
     try:
         with request.urlopen(req, timeout=90) as resp:
             body = resp.read().decode("utf-8")
+            trimmed = body.strip().lower()
+            if trimmed.startswith("<!doctype") or trimmed.startswith("<html"):
+                raise RuntimeError(
+                    f"Server returned an HTML web page instead of a JSON API response from '{url}'.\n"
+                    "WonkaChat requires your organization workspace subdomain in WONKA_BASE_URL.\n"
+                    "Example: https://<your-organization>.wonka.chat/api/agents/v1"
+                )
             return json.loads(body)
     except error.HTTPError as exc:
         err_body = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"HTTP {exc.code}: {err_body}")
+    except RuntimeError:
+        raise
     except Exception as exc:
         raise RuntimeError(f"Network error: {exc}")
 

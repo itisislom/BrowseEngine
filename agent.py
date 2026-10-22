@@ -84,31 +84,95 @@ def load_env(env_path: Path):
 
 load_env(WORKSPACE_DIR / ".env")
 
-if os.environ.get("GROQ_API_KEY"):
-    API_KEY = os.environ["GROQ_API_KEY"]
-    BASE_URL = os.environ.get("BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
-    DEFAULT_MODEL = os.environ.get("MODEL", "qwen/qwen3-32b")
-elif os.environ.get("OPENROUTER_API_KEY"):
-    API_KEY = os.environ["OPENROUTER_API_KEY"]
-    BASE_URL = os.environ.get("BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
-    DEFAULT_MODEL = os.environ.get("MODEL", "google/gemma-4-31b-it:free")
-elif os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_API_KEY"):
-    API_KEY = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_API_KEY", "")
-    BASE_URL = (os.environ.get("BASE_URL") or os.environ.get("HF_BASE_URL", "https://router.huggingface.co/v1")).rstrip("/")
-    DEFAULT_MODEL = os.environ.get("MODEL") or os.environ.get("HF_MODEL", "Qwen/Qwen2.5-Coder-32B-Instruct")
-elif os.environ.get("WONKA_API_KEY"):
-    API_KEY = os.environ["WONKA_API_KEY"]
-    BASE_URL = os.environ.get("WONKA_BASE_URL", "https://islom-2.wonka.chat/api/agents/v1").rstrip("/")
-    DEFAULT_MODEL = os.environ.get("WONKA_MODEL") or os.environ.get("WONKA_AGENT_ID", "agent_Cnarqpg5JSuX5H2ZZ-hz2")
-else:
-    API_KEY = os.environ.get("OPENAI_API_KEY", "")
-    BASE_URL = os.environ.get("BASE_URL", "https://api.openai.com/v1").rstrip("/")
-    DEFAULT_MODEL = os.environ.get("MODEL", "gpt-4o")
+FREE_MODELS = [
+    {
+        "id": "1",
+        "provider": "Groq",
+        "model": "qwen/qwen3.8-27b",
+        "name": "Groq Qwen 3.8 27B",
+        "description": "Fast coding model, Groq free tier (14.4k req/day)",
+        "base_url": "https://api.groq.com/openai/v1",
+        "api_key_env": "GROQ_API_KEY",
+        "context_tokens": 6000,
+        "is_groq": True,
+    },
+    {
+        "id": "2",
+        "provider": "Google",
+        "model": "gemini-2.5-flash",
+        "name": "Gemini 2.5 Flash",
+        "description": "Smart, 1M context, Google AI Studio free tier",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "api_key_env": "GEMINI_API_KEY",
+        "context_tokens": 32000,
+        "is_groq": False,
+    },
+    {
+        "id": "3",
+        "provider": "Groq",
+        "model": "openai/gpt-oss-120b",
+        "name": "Groq GPT-OSS 120B",
+        "description": "Massive 120B open frontier model, Groq free tier",
+        "base_url": "https://api.groq.com/openai/v1",
+        "api_key_env": "GROQ_API_KEY",
+        "context_tokens": 6000,
+        "is_groq": True,
+    },
+    {
+        "id": "4",
+        "provider": "Groq",
+        "model": "openai/gpt-oss-20b",
+        "name": "Groq GPT-OSS 20B",
+        "description": "Fast 20B reasoning model, Groq free tier",
+        "base_url": "https://api.groq.com/openai/v1",
+        "api_key_env": "GROQ_API_KEY",
+        "context_tokens": 6000,
+        "is_groq": True,
+    },
+    {
+        "id": "5",
+        "provider": "Google",
+        "model": "gemini-2.5-pro",
+        "name": "Gemini 2.5 Pro",
+        "description": "Frontier reasoning, Google AI Studio free tier",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "api_key_env": "GEMINI_API_KEY",
+        "context_tokens": 32000,
+        "is_groq": False,
+    },
+    {
+        "id": "6",
+        "provider": "OpenRouter",
+        "model": "google/gemma-4-31b-it:free",
+        "name": "OpenRouter Gemma 31B",
+        "description": "OpenRouter free model",
+        "base_url": "https://openrouter.ai/api/v1",
+        "api_key_env": "OPENROUTER_API_KEY",
+        "context_tokens": 8000,
+        "is_groq": False,
+    },
+]
 
-if "MODEL" in os.environ:
-    DEFAULT_MODEL = os.environ["MODEL"]
-if "BASE_URL" in os.environ:
-    BASE_URL = os.environ["BASE_URL"].rstrip("/")
+
+def get_available_models() -> list:
+    return [m for m in FREE_MODELS if os.environ.get(m["api_key_env"])]
+
+
+def _find_default_model() -> dict:
+    available = get_available_models()
+    req_model = os.environ.get("MODEL")
+    if req_model:
+        for m in available:
+            if m["model"].lower() == req_model.lower() or req_model.lower() in m["name"].lower():
+                return m
+    return available[0] if available else FREE_MODELS[0]
+
+
+ACTIVE_MODEL = _find_default_model()
+API_KEY = os.environ.get(ACTIVE_MODEL["api_key_env"], "")
+BASE_URL = os.environ.get("BASE_URL", ACTIVE_MODEL["base_url"]).rstrip("/")
+DEFAULT_MODEL = ACTIVE_MODEL["model"]
+IS_GROQ = ACTIVE_MODEL.get("is_groq", False)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -118,8 +182,7 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-IS_GROQ = "api.groq.com" in BASE_URL
-CONTEXT_TOKENS = _env_int("CONTEXT_TOKENS", 6000 if IS_GROQ else 32000)
+CONTEXT_TOKENS = _env_int("CONTEXT_TOKENS", ACTIVE_MODEL.get("context_tokens", 6000 if IS_GROQ else 32000))
 MAX_TOOL_OUTPUT = _env_int("MAX_TOOL_OUTPUT", 1500 if IS_GROQ else 6000)
 MAX_READ_LINES = 250 if IS_GROQ else 400
 LIST_LIMIT = 150 if IS_GROQ else 300
@@ -131,11 +194,25 @@ GRAY, RED, GREEN, YELLOW, CYAN, BLUE, RESET = (
 )
 
 CFG = {
+    "current_model": ACTIVE_MODEL,
     "base_url": BASE_URL,
     "api_key": API_KEY,
     "model": DEFAULT_MODEL,
-    "native_tools": True,  # auto-switches to False if provider rejects tool schema
+    "native_tools": True,
 }
+
+
+def select_model(spec: dict):
+    global IS_GROQ
+    CFG["current_model"] = spec
+    CFG["base_url"] = spec["base_url"].rstrip("/")
+    CFG["api_key"] = os.environ.get(spec["api_key_env"], "")
+    CFG["model"] = spec["model"]
+    CFG["native_tools"] = True
+    IS_GROQ = spec.get("is_groq", False)
+    if "SESSION" in globals():
+        SESSION.budget = spec.get("context_tokens", 6000 if IS_GROQ else 32000)
+        SESSION.project_ctx_dirty = True
 
 # --------------------------------------------------------------------------------------
 # Small helpers & security guardrails
@@ -1004,6 +1081,15 @@ class ContextOverflow(RuntimeError):
     """The request was too large for the model / the provider's per-request limit."""
 
 
+class ModelUnavailableError(RuntimeError):
+    """The current model is rate-limited, overloaded, or unreachable."""
+    def __init__(self, model_spec: dict, reason: str):
+        name = model_spec.get("name", "Model") if isinstance(model_spec, dict) else str(model_spec)
+        super().__init__(f"{name} unavailable: {reason}")
+        self.model_spec = model_spec
+        self.reason = reason
+
+
 def _api_error_message(err_body: str) -> str:
     try:
         j = json.loads(err_body)
@@ -1073,18 +1159,24 @@ def call_llm(base_url: str, api_key: str, model: str, messages: list, tools: lis
                 print(f"{YELLOW}[warn] provider rejected native tool schema; switching to text tool-calling mode{RESET}")
                 CFG["native_tools"] = False
                 return call_llm(base_url, api_key, model, messages, tools=None, retries=retries)
-            if exc.code in (429, 500, 502, 503, 504) and attempt < retries:
-                try:
-                    wait = float(exc.headers.get("Retry-After", delay))
-                except (TypeError, ValueError):
-                    wait = delay
-                wait = min(max(wait, 1.0), 30.0)
-                print(f"{GRAY}[api] HTTP {exc.code}, retry in {wait:.0f}s ({attempt + 1}/{retries}){RESET}")
-                time.sleep(wait)
-                delay *= 2
-                continue
+            if exc.code in (429, 500, 502, 503, 504):
+                err_msg = _api_error_message(err_body)
+                if len(get_available_models()) > 1:
+                    raise ModelUnavailableError(CFG.get("current_model"), f"HTTP {exc.code} ({err_msg[:80]})")
+                if attempt < retries:
+                    try:
+                        wait = float(exc.headers.get("Retry-After", delay))
+                    except (TypeError, ValueError):
+                        wait = delay
+                    wait = min(max(wait, 1.0), 30.0)
+                    print(f"{GRAY}[api] HTTP {exc.code}, retry in {wait:.0f}s ({attempt + 1}/{retries}){RESET}")
+                    time.sleep(wait)
+                    delay *= 2
+                    continue
             raise RuntimeError(f"HTTP {exc.code}: {_api_error_message(err_body)}")
         except (error.URLError, TimeoutError, ConnectionError) as exc:
+            if len(get_available_models()) > 1 and attempt >= 1:
+                raise ModelUnavailableError(CFG.get("current_model"), f"Network error ({exc})")
             if attempt < retries:
                 print(f"{GRAY}[api] network error ({exc}), retry in {delay:.0f}s{RESET}")
                 time.sleep(delay)
@@ -1296,26 +1388,59 @@ How to work:
 5. When you learn something durable (conventions, architecture decisions, user preferences, gotchas) save it with `remember`. Keep notes short.
 6. Tool output is truncated. If something is cut, ask for a narrower range instead of repeating the same call.
 7. Answer in the user's language, concisely, once the task is done: what changed and why. No filler."""
-
-
 def run_agent_turn(sess: Session, max_steps: int = 40):
     recent = []
+    active_models = get_available_models()
     for step in range(1, max_steps + 1):
         fit_context(sess)
         resp = None
-        for _attempt in range(3):
+        max_attempts = max(3, len(active_models) * 2)
+        for _attempt in range(max_attempts):
+            curr_spec = CFG.get("current_model") or (active_models[0] if active_models else None)
             system_text = sess.system_text()
             messages = [{"role": "system", "content": system_text}] + sess.history
-            print(f"{GRAY}[Step {step}/{max_steps}] ctx ~{total_tokens(system_text, sess.history)}/{sess.budget} tok{RESET}")
+            model_tag = f"{curr_spec['name']} ({curr_spec['provider']})" if curr_spec else CFG['model']
+            print(f"{GRAY}[Step {step}/{max_steps}] [{model_tag}] ctx ~{total_tokens(system_text, sess.history)}/{sess.budget} tok{RESET}")
             try:
                 resp = call_llm(CFG["base_url"], CFG["api_key"], CFG["model"], messages, OPENAI_TOOLS)
                 break
+            except ModelUnavailableError as exc:
+                if len(active_models) > 1:
+                    curr_m = CFG.get("current_model", active_models[0])
+                    idx = 0
+                    for i, m in enumerate(active_models):
+                        if m["model"] == curr_m["model"] and m["base_url"] == curr_m["base_url"]:
+                            idx = i
+                            break
+                    next_m = active_models[(idx + 1) % len(active_models)]
+                    print(f"{YELLOW}[Failover] {curr_m['name']} is busy/unavailable ({exc.reason}). "
+                          f"Switching to {next_m['name']} without losing context...{RESET}")
+                    select_model(next_m)
+                    fit_context(sess, force=True)
+                    time.sleep(0.8)
+                    continue
+                else:
+                    print(f"{RED}API Error: {exc}{RESET}")
+                    return
             except ContextOverflow as exc:
                 sess.budget = max(3000, int(sess.budget * 0.6))
                 print(f"{YELLOW}[context] provider says the request is too large ({str(exc)[:120]}); "
                       f"budget lowered to {sess.budget} tokens{RESET}")
                 fit_context(sess, force=True)
             except RuntimeError as exc:
+                if len(active_models) > 1 and ("429" in str(exc) or "503" in str(exc) or "limit" in str(exc).lower()):
+                    curr_m = CFG.get("current_model", active_models[0])
+                    idx = 0
+                    for i, m in enumerate(active_models):
+                        if m["model"] == curr_m["model"] and m["base_url"] == curr_m["base_url"]:
+                            idx = i
+                            break
+                    next_m = active_models[(idx + 1) % len(active_models)]
+                    print(f"{YELLOW}[Failover] {curr_m['name']} error. Switching to {next_m['name']}...{RESET}")
+                    select_model(next_m)
+                    fit_context(sess, force=True)
+                    time.sleep(0.8)
+                    continue
                 print(f"{RED}API Error: {exc}{RESET}")
                 return
         if resp is None:
@@ -1349,14 +1474,19 @@ def run_agent_turn(sess: Session, max_steps: int = 40):
             assistant["tool_calls"] = calls
         sess.history.append(assistant)
 
+        curr_spec = CFG.get("current_model") or (active_models[0] if active_models else None)
+        model_name = f"{curr_spec['name']} ({curr_spec['provider']})" if curr_spec else CFG['model']
+
         if not calls:
-            print(f"\n{GREEN}=== Agent Response ==={RESET}")
+            print(f"\n{CYAN}[AI: {model_name}]{RESET}")
+            print(f"{GREEN}=== Agent Response ==={RESET}")
             print(content)
             sess.save()
             return
 
+        print(f"\n{CYAN}[AI: {model_name}]{RESET}")
         if content:
-            print(f"\n{YELLOW}[Thought]{RESET} {content}")
+            print(f"{YELLOW}[Thought]{RESET} {content}")
 
         for tc in calls:
             name = tc["function"]["name"]
@@ -1428,9 +1558,43 @@ HELP = """Commands:
   /memory         show long-term memory
   /forget         clear long-term memory (.agent/memory.md)
   /plan           show the current plan
-  /model <name>   show or switch the active model
+  /model [num]    list available free models or switch to a specific one
   /refresh        rebuild the project context / file map
   exit            quit"""
+
+
+def handle_model_command(arg: str, sess: Session):
+    available = get_available_models()
+    if not available:
+        print(f"{YELLOW}No free models found with configured API keys.{RESET}")
+        return
+    if not arg:
+        print(f"\n{CYAN}=== Available Free Models ==={RESET}")
+        curr = CFG.get("current_model", available[0])
+        for idx, m in enumerate(available, 1):
+            is_active = (m["model"] == curr["model"] and m["base_url"] == curr["base_url"])
+            tag = f" {GREEN}[active]{RESET}" if is_active else ""
+            print(f"  {idx}. {m['name']} ({m['provider']}){tag}")
+            print(f"     {GRAY}ID: {m['model']} | Context: {m['context_tokens']} tok | {m['description']}{RESET}")
+        print(f"\nSwitch model: /model <number> or /model <name>\n")
+        return
+    chosen = None
+    if arg.isdigit():
+        num = int(arg)
+        if 1 <= num <= len(available):
+            chosen = available[num - 1]
+    if not chosen:
+        for m in available:
+            if arg.lower() in m["name"].lower() or arg.lower() in m["model"].lower():
+                chosen = m
+                break
+    if chosen:
+        select_model(chosen)
+        sess.budget = chosen.get("context_tokens", 6000 if chosen.get("is_groq") else 32000)
+        sess.project_ctx_dirty = True
+        print(f"{GREEN}Switched to:{RESET} {chosen['name']} ({chosen['model']}) via {chosen['provider']}")
+    else:
+        print(f"{RED}Model '{arg}' not found in free pool. Type /model to see available models.{RESET}")
 
 
 def handle_command(line: str, sess: Session):
@@ -1461,12 +1625,7 @@ def handle_command(line: str, sess: Session):
     elif cmd == "/plan":
         print(render_plan(sess.plan) or "(no plan)")
     elif cmd == "/model":
-        if arg:
-            CFG["model"] = arg
-            CFG["native_tools"] = True
-            print(f"Model switched to: {CFG['model']}")
-        else:
-            print(f"Current model: {CFG['model']}")
+        handle_model_command(arg, sess)
     elif cmd == "/refresh":
         sess.project_ctx = build_project_context()
         sess.project_ctx_dirty = False
@@ -1478,32 +1637,60 @@ def handle_command(line: str, sess: Session):
 def main():
     parser = argparse.ArgumentParser(description="BrowseEngine AI Coding Agent CLI")
     parser.add_argument("prompt", nargs="*", help="Optional initial task prompt")
-    parser.add_argument("--base-url", default=BASE_URL, help="API base URL")
-    parser.add_argument("--api-key", default=API_KEY, help="API key")
-    parser.add_argument("-m", "--model", default=DEFAULT_MODEL, help="Model name or Agent ID")
+    parser.add_argument("--base-url", default=None, help="API base URL")
+    parser.add_argument("--api-key", default=None, help="API key")
+    parser.add_argument("-m", "--model", default=None, help="Model name, number, or Agent ID")
     parser.add_argument("--max-steps", type=int, default=40, help="Max tool iterations per request")
-    parser.add_argument("--context", type=int, default=CONTEXT_TOKENS, help="Context budget in tokens")
-    parser.add_argument("--new", action="store_true", help="Do not resume the previous session")
+    parser.add_argument("--context", type=int, default=None, help="Context budget in tokens")
+    parser.add_argument("--resume", action="store_true", help="Resume previous conversation session")
     args = parser.parse_args()
 
-    if not args.api_key:
+    if args.model:
+        available = get_available_models()
+        chosen = None
+        if args.model.isdigit():
+            n = int(args.model)
+            if 1 <= n <= len(available):
+                chosen = available[n - 1]
+        if not chosen:
+            for m in available:
+                if args.model.lower() in m["name"].lower() or args.model.lower() in m["model"].lower():
+                    chosen = m
+                    break
+        if chosen:
+            select_model(chosen)
+        else:
+            CFG["model"] = args.model
+
+    if args.base_url:
+        CFG["base_url"] = args.base_url.rstrip("/")
+    if args.api_key:
+        CFG["api_key"] = args.api_key
+    if args.context:
+        SESSION.budget = max(3000, args.context)
+
+    if not CFG["api_key"]:
         print(f"{RED}Error: API key is not set. Put it into .env or pass --api-key.{RESET}")
         sys.exit(1)
 
-    CFG.update(base_url=args.base_url.rstrip("/"), api_key=args.api_key, model=args.model)
-    SESSION.budget = max(3000, args.context)
+    curr_m = CFG.get("current_model") or {}
+    model_label = f"{curr_m.get('name', CFG['model'])} ({curr_m.get('provider', 'Custom')})"
 
     print("\033[1;34m========================================\033[0m")
     print("\033[1;34m      BrowseEngine Coding Agent CLI      \033[0m")
     print("\033[1;34m========================================\033[0m")
+    print(f"Active AI: {model_label}")
     print(f"Base URL : {CFG['base_url']}")
-    print(f"Model    : {CFG['model']}")
+    print(f"Model ID : {CFG['model']}")
     print(f"Context  : {SESSION.budget} tokens")
     print(f"Workspace: {WORKSPACE_DIR}")
 
-    if not args.new and SESSION.load():
+    if args.resume and SESSION.load():
         print(f"Session  : resumed ({len(SESSION.history)} msgs, summary: {'yes' if SESSION.summary else 'no'}). "
-              f"/clear to start over, /help for commands.")
+              f"/clear to start over, /model to switch model.")
+    else:
+        SESSION.reset()
+        print("Session  : new context started (use --resume to continue previous session)")
     print()
 
     initial = " ".join(args.prompt).strip()

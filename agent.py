@@ -1732,11 +1732,21 @@ def main():
     parser.add_argument("prompt", nargs="*", help="Optional initial task prompt")
     parser.add_argument("--base-url", default=None, help="API base URL")
     parser.add_argument("--api-key", default=None, help="API key")
+    parser.add_argument("-w", "--workspace", default=None, help="Workspace directory to operate on")
     parser.add_argument("-m", "--model", default=None, help="Model name, number, or Agent ID")
     parser.add_argument("--max-steps", type=int, default=40, help="Max tool iterations per request")
     parser.add_argument("--context", type=int, default=None, help="Context budget in tokens")
     parser.add_argument("--resume", action="store_true", help="Resume previous conversation session")
     args = parser.parse_args()
+
+    global WORKSPACE_DIR, STATE_DIR, SESSION_FILE, MEMORY_FILE, MODELS_CACHE_FILE
+    if args.workspace:
+        WORKSPACE_DIR = Path(args.workspace).resolve()
+        STATE_DIR = WORKSPACE_DIR / ".agent"
+        SESSION_FILE = STATE_DIR / "session.json"
+        MEMORY_FILE = STATE_DIR / "memory.md"
+        MODELS_CACHE_FILE = STATE_DIR / "models_cache.json"
+        load_env(WORKSPACE_DIR / ".env")
 
     if args.model:
         available = get_available_models()
